@@ -6,23 +6,32 @@
 #include <sys/ioctl.h>
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
+#include <termios.h>
+
+#include "functions.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#define NB_ENABLE 0
+#define NB_DISABLE 1
 
 static const char *device = "/dev/spidev0.0";	// puvodne 1.1
 static uint8_t mode;
 static uint8_t bits = 8;
-static uint32_t speed = 5000;
+static uint32_t speed = 50000;
 static uint16_t delay;
 
+char ch;
+int ret = 0;
+int fd;
+
 int main (void) {
-	char ch;
-	int ret = 0;
-	int fd;
-	
-	uint8_t tx[] = {0xFA};
-	uint8_t rx[ARRAY_SIZE(tx)] = {0, };
-	
+
+
+	uint8_t tx[] = {0x00, 0x00, 0x00, 0x00, 0x00,
+			 0x00, 0x00, 0x00, 0x00, 0x00};
+	uint8_t rx[] = {0x00, 0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00, 0x00};
+
 	struct spi_ioc_transfer tr = {
 		.tx_buf = (unsigned long)tx,
 		.rx_buf = (unsigned long)rx,
@@ -32,9 +41,79 @@ int main (void) {
 		.bits_per_word = bits,
 	};
 
-  
 	printf("Hello from raspberry!!\n");
-  
+
+
+	openSPI();
+	
+	nonblock(NB_ENABLE);
+	
+	printf("Start...\n");	
+
+/* main loop */
+
+  	while(1){
+  		// read(STDIN_FILENO, &ch, 1);
+  		if(kbhit()){
+  			ch = fgetc(stdin);
+			switch (ch){
+				case 'w': tx[0] = 1; printf("forward\n\r"); break;
+				case 's': tx[0] = 2; printf("reverse\n\r"); break;
+				case ' ': tx[0] = 0; printf("halt   \n\r"); break;
+				case '\n': break;
+				default: tx[0] = 0; printf("\r\n");
+			}
+		}
+		ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+
+		usleep(10000);
+
+  	}
+
+	close(fd);
+
+   	nonblock(NB_DISABLE);
+
+	printf("\nExiting...\n\n");  
+	
+	return 0;
+}
+
+void nonblock(int state)
+{
+    struct termios ttystate;
+    //get the terminal state
+    tcgetattr(STDIN_FILENO, &ttystate);
+
+    if (state==NB_ENABLE)
+    {
+        //turn off canonical mode
+        ttystate.c_lflag &= ~ICANON;
+        //minimum of number input read.
+        ttystate.c_cc[VMIN] = 1;
+    }
+    else if (state==NB_DISABLE)
+    {
+        //turn on canonical mode
+        ttystate.c_lflag |= ICANON;
+    }
+    //set the terminal attributes.
+    tcsetattr(STDIN_FILENO, TCSANOW, &ttystate);
+
+}
+
+int kbhit()
+{
+    struct timeval tv;
+    fd_set fds;
+    tv.tv_sec = 0;  tv.tv_usec = 0;
+    FD_ZERO(&fds);
+    FD_SET(STDIN_FILENO, &fds); //STDIN_FILENO is 0
+    select(STDIN_FILENO+1, &fds, NULL, NULL, &tv);
+    return FD_ISSET(STDIN_FILENO, &fds);
+}
+
+int openSPI(void){
 	fd = open(device, O_RDWR);
 	if (fd < 0)
 		printf("can't open device");
@@ -76,42 +155,5 @@ int main (void) {
 	printf("bits per word: %d\n", bits);
 	printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
-//////////////////////////////////////////////////
-  	while(read(STDIN_FILENO, &ch, 1) > 0){
-		if(ch != '\n'){
-			switch (ch){
-				case '0': tx[0]=0; break;
-				case '1': tx[0]=1; break;
-				case '2': tx[0]=2; break;
-				case '3': tx[0]=3; break;
-				case '4': tx[0]=4; break;
-				case '5': tx[0]=5; break;
-				case '6': tx[0]=6; break;
-				case '7': tx[0]=7; break;
-				case '8': tx[0]=8; break;
-				case '9': tx[0]=9; break;
-				case 'a': tx[0]=10; break;
-				case 'b': tx[0]=11; break;
-				case 'c': tx[0]=12; break;
-				case 'd': tx[0]=13; break;
-				case 'e': tx[0]=14; break;
-				case 'f': tx[0]=15; break;
-				default: tx[0]=(uint8_t)ch;
-			}
-			
-			ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
-		}		
-		
-		
-  	}
-
-
-	ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
-
-	close(fd);
-
-	return ret;
-  
-  
-  return 0;
+	return;
 }
