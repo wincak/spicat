@@ -1,3 +1,19 @@
+/********************************************************************/
+/*	SPICAT															*/
+/*  Author: Wincak													*/
+/*																	*/
+/*	Reads input from stdin and exchanges data over SPI				*/
+/*	according to commands. 											*/
+/*	Purpose: control of SPI peripherals in regular intervals		*/
+/*																	*/
+/********************************************************************/
+
+// Usage with netcat (nc)
+// HOST:	$ mkfifo fifo
+//			$ cat fifo | ./a.out -i 2>&1 | nc -l 1234 -k > fifo
+// USER:	$ nc <host_ip> 1234
+
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -33,14 +49,16 @@ int main (void) {
 	uint8_t rx[] = {0x00, 0x00, 0x00, 0x00, 0x00,
 			0x00, 0x00, 0x00, 0x00, 0x00};
 
-	printf("Hello from raspberry!!\n");
+	fprintf(stdout,"Hello from raspberry!!\n");
+	fflush(stdout);
 
 
 	openSPI();
 	
 	nonblock(NB_ENABLE);
 	
-	printf("Start...\n");	
+	printf("Start...\n");
+	fflush(stdout);	
 
 /* main loop */
 
@@ -56,6 +74,7 @@ int main (void) {
 				case 'q': return 0;
 				default: tx[0] = 0; printf("\r\n");
 			}
+			fflush(stdout);
 		}
 		
 		//tx_data.command = 1;
