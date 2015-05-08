@@ -26,20 +26,12 @@ int fd;
 
 int main (void) {
 
-
-	uint8_t tx[] = {0x00, 0x00, 0x00, 0x00, 0x00,
+	tx_struct tx_data;
+	
+	uint8_t tx[] = {0x00, 0x0f, 0x00, 0x00, 0x00,
 			 0x00, 0x00, 0x00, 0x00, 0x00};
 	uint8_t rx[] = {0x00, 0x00, 0x00, 0x00, 0x00,
 			0x00, 0x00, 0x00, 0x00, 0x00};
-
-	struct spi_ioc_transfer tr = {
-		.tx_buf = (unsigned long)tx,
-		.rx_buf = (unsigned long)rx,
-		.len = sizeof(tx),
-		.delay_usecs = delay,
-		.speed_hz = speed,
-		.bits_per_word = bits,
-	};
 
 	printf("Hello from raspberry!!\n");
 
@@ -57,14 +49,17 @@ int main (void) {
   		if(kbhit()){
   			ch = fgetc(stdin);
 			switch (ch){
-				case 'w': tx[0] = 1; printf("forward\n\r"); break;
-				case 's': tx[0] = 2; printf("reverse\n\r"); break;
-				case ' ': tx[0] = 0; printf("halt   \n\r"); break;
+				case 'w': tx_data.command = 1; printf("forward\n\r"); break;
+				case 's': tx_data.command = 2; printf("reverse\n\r"); break;
+				case ' ': tx_data.command = 0; printf("halt   \n\r"); break;
 				case '\n': break;
+				case 'q': return 0;
 				default: tx[0] = 0; printf("\r\n");
 			}
 		}
-		ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+		
+		//tx_data.command = 1;
+		SPI_send_data(tx_data);
 
 		usleep(10000);
 
@@ -77,6 +72,31 @@ int main (void) {
 	printf("\nExiting...\n\n");  
 	
 	return 0;
+}
+
+
+void SPI_send_byte (uint8_t *tx_byte){
+	uint8_t rx_byte;
+
+	struct spi_ioc_transfer tr = {
+		.tx_buf = (unsigned long)tx_byte,
+		.rx_buf = (unsigned long)rx_byte,
+		.len = 1,
+		.delay_usecs = delay,
+		.speed_hz = speed,
+		.bits_per_word = bits,
+	};
+
+	ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+
+}
+
+void SPI_send_data(tx_struct tx_send){
+
+	SPI_send_byte(&tx_send.command);
+	SPI_send_byte(&tx_send.current);
+	
+	return;
 }
 
 void nonblock(int state)
