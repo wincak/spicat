@@ -25,10 +25,7 @@
 #include <termios.h>
 
 #include "functions.h"
-
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
-#define NB_ENABLE 0
-#define NB_DISABLE 1
+#include "definitions.h"
 
 static const char *device = "/dev/spidev0.0";	// puvodne 1.1
 static uint8_t mode;
@@ -42,16 +39,13 @@ int fd;
 
 int main (void) {
 
-	tx_struct tx_data;
+	tx_struct tx_left, tx_right;
+	rx_struct rx_left, rx_right;
 	
-	uint8_t tx[] = {0x00, 0x0f, 0x00, 0x00, 0x00,
-			 0x00, 0x00, 0x00, 0x00, 0x00};
-	uint8_t rx[] = {0x00, 0x00, 0x00, 0x00, 0x00,
-			0x00, 0x00, 0x00, 0x00, 0x00};
-
+	tx_right.address = PIC1;
+	tx_left.address = PIC2;
+	
 	fprintf(stdout,"Hello from raspberry!!\n");
-	fflush(stdout);
-
 
 	openSPI();
 	
@@ -63,22 +57,20 @@ int main (void) {
 /* main loop */
 
   	while(1){
-  		// read(STDIN_FILENO, &ch, 1);
   		if(kbhit()){
   			ch = fgetc(stdin);
 			switch (ch){
-				case 'w': tx_data.command = 1; printf("forward\n\r"); break;
-				case 's': tx_data.command = 2; printf("reverse\n\r"); break;
-				case ' ': tx_data.command = 0; printf("halt   \n\r"); break;
+				case 'w': tx_right.command = motor_CW; printf("forward\n\r"); break;
+				case 's': tx_right.command = motor_CCW; printf("reverse\n\r"); break;
+				case ' ': tx_right.command = free_run; printf("halt   \n\r"); break;
 				case '\n': break;
 				case 'q': return 0;
-				default: tx[0] = 0; printf("\r\n");
+				//default: tx[0] = 0; printf("\r\n");
 			}
 			fflush(stdout);
 		}
 		
-		//tx_data.command = 1;
-		SPI_send_data(tx_data);
+		SPI_exchange_data(tx_right);
 
 		usleep(10000);
 
@@ -93,31 +85,51 @@ int main (void) {
 	return 0;
 }
 
-
-void SPI_send_byte (uint8_t *tx_byte){
-	uint8_t rx_byte;
-
+rx_struct SPI_exchange_data(tx_struct tx_data){
+	int ret;
+	rx_struct received;
+	uint8_t tx[] = {
+		0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+	};
+	uint8_t rx[ARRAY_SIZE(tx)] = {0, };
+	
+	tx[0] = tx_data.address;
+	tx[1] = tx_data.command;
+	tx[3] = tx_data.current;
+		
 	struct spi_ioc_transfer tr = {
-		.tx_buf = (unsigned long)tx_byte,
-		.rx_buf = (unsigned long)rx_byte,
-		.len = 1,
+		.tx_buf = (unsigned long)tx,
+		.rx_buf = (unsigned long)rx,
+		.len = ARRAY_SIZE(tx),
 		.delay_usecs = delay,
 		.speed_hz = speed,
 		.bits_per_word = bits,
-	};
+	};	
 
+	// Transfer and receive data
 	ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+	if (ret < 1){
+		printf("can't send spi message\n");
+		fflush(stdout);
+	}
+		
+	// Evaluate	
+	received.dutycycle = rx[3];
+	received.current_req = rx[4];
+	received.H_current = rx[5];
+	received.L_current = rx[6];
+	received.trans_temp = rx[7];
+	received.motor_temp = rx[8];
+	received.batt_voltage = rx[9];
+	received.status_byte = rx[10];
 
+	return received;
 }
 
-void SPI_send_data(tx_struct tx_send){
 
-	SPI_send_byte(&tx_send.command);
-	SPI_send_byte(&tx_send.current);
-	
-	return;
-}
 
+// Make stdin reading non-blocking
 void nonblock(int state)
 {
     struct termios ttystate;
@@ -141,6 +153,7 @@ void nonblock(int state)
 
 }
 
+// Check for input
 int kbhit()
 {
     struct timeval tv;
@@ -152,6 +165,8 @@ int kbhit()
     return FD_ISSET(STDIN_FILENO, &fds);
 }
 
+
+// Well.... open SPI?
 int openSPI(void){
 	fd = open(device, O_RDWR);
 	if (fd < 0)
