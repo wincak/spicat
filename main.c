@@ -1,12 +1,14 @@
 /********************************************************************/
-/*	SPICAT															*/
-/*  Author: Wincak													*/
-/*																	*/
-/*	Reads input from stdin and exchanges data over SPI				*/
-/*	according to commands. 											*/
-/*	Purpose: control of SPI peripherals in regular intervals		*/
-/*																	*/
+/*	SPICAT							    */
+/*  Author: Wincak						    */
+/*								    */
+/*	Reads input from stdin and exchanges data over SPI	    */
+/*	according to commands. 					    */
+/*	Purpose: control of SPI peripherals in regular intervals    */
+/*								    */
 /********************************************************************/
+
+// Compile with -lrt linker option
 
 // Usage with netcat (nc)
 // HOST:	$ mkfifo fifo
@@ -23,56 +25,151 @@
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
 #include <termios.h>
+#include <signal.h>
+#include <time.h>
 
 #include "functions.h"
 #include "definitions.h"
 
-static const char *device = "/dev/spidev0.0";	// puvodne 1.1
+// SPI variables
+static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
 static uint8_t bits = 8;
-static uint32_t speed = 50000;
+static uint32_t speed = 245000;
 static uint16_t delay;
 
+// Signal timer variables
+timer_t timerid;
+
+struct sigevent sev;
+struct itimerspec its;
+long long freq_nanosecs;
+sigset_t mask;
+struct sigaction sa;
+
+int SPI_timer;     // timer overflow notification
+
+
+// SPI transfer structures
+tx_struct tx_left, tx_right;
+rx_struct rx_left, rx_right;
+
+// STDIN input
+signed int rx_tab[4];
+
 char ch;
-int ret = 0;
 int fd;
 
-int main (void) {
+// Load char data from stdin (netcat)
+void load_tab (void)
+{
+	char position;
+	signed char ret;
 
-	tx_struct tx_left, tx_right;
-	rx_struct rx_left, rx_right;
-	
+	for (position = 0; position <=3; position++)
+	{
+		ret = getchar();
+		rx_tab[position] = ret;
+		fprintf(stderr,"RD: %i ",ret);
+	}
+	fprintf(stderr,"\n");
+}
+
+// Read input data and calculate control values
+void read_tab (void)
+{
+	// IGNORING X,Z axes and Button!
+	signed char req_power;
+
+	req_power = rx_tab[1];	// Y axis
+	if(req_power == 0) motor_stop();
+	else if (0 < req_power <= 100)
+	{
+		forward();
+	}
+	else if (-100 <= req_power < 0)
+	{
+		backward();
+	}
+	else motor_stop(); return;	//error
+
+	tx_right.current = abs(req_power)*(CURRENT_MAX/100);
+	tx_left.current = abs(req_power)*(CURRENT_MAX/100);
+	fprintf(stderr,"ABS: %i \n",abs(req_power)*(CURRENT_MAX/100));
+
+}
+
+
+int main (void) {
 	tx_right.address = PIC1;
+	tx_right.command = 0;
+	tx_right.current= 0;
+
 	tx_left.address = PIC2;
-	
+	tx_right.command = 0;
+	tx_right.current= 0;
+
 	fprintf(stdout,"Hello from raspberry!!\n");
 
 	openSPI();
-	
+
 	nonblock(NB_ENABLE);
 	
+	SPI_timer_init();	// Signals cause instant connection loss!! but why?
+	SPI_timer = 0;	// clear timer flag
+	sigprocmask(SIG_BLOCK, &mask, NULL);
+
 	printf("Start...\n");
 	fflush(stdout);	
 
 /* main loop */
 
   	while(1){
+
+		// Read input
+		fprintf(stderr, "cycle\n");
+		ch = getchar();
+		if (ch == 255) {
+			printf("Connection closed\n"); return(EXIT_SUCCESS);
+		}
+
+		if (ch == 250){
+			fprintf(stderr,"Loading tab\n");
+			load_tab();
+			read_tab();
+		}
+
+		// Clear data from input buffer
+		int c;
+		while ((c = getchar()) != '\n' && c != EOF) fprintf(stderr, "clr");
+
+// Old keyboard control method
+/*
   		if(kbhit()){
   			ch = fgetc(stdin);
 			switch (ch){
-				case 'w': tx_right.command = motor_CW; printf("forward\n\r"); break;
-				case 's': tx_right.command = motor_CCW; printf("reverse\n\r"); break;
-				case ' ': tx_right.command = free_run; printf("halt   \n\r"); break;
+				case 'w': forward(); break;
+				case 's': backward(); break;
+				case ' ': motor_stop(); break;
+				case '+': current_plus(); break;
+				case '-': current_minus(); break;
 				case '\n': break;
 				case 'q': return 0;
 				//default: tx[0] = 0; printf("\r\n");
 			}
-			fflush(stdout);
 		}
-		
-		SPI_exchange_data(tx_right);
+*/
+		rx_right = SPI_exchange_data(tx_right);
+		rx_left = SPI_exchange_data(tx_left);
 
-		usleep(10000);
+		//printf("trans-temp: %i \n",rx_right.trans_temp); fflush(stdout);
+		printf("\rRGHT: %i CURR: %.1d TEMP: %i             ",tx_right.command, \
+		tx_right.current/10, rx_right.trans_temp);
+
+		fflush(stdout);
+
+		//usleep(100000);	// original value
+		usleep(10000);	// just testing signals
 
   	}
 
@@ -80,10 +177,72 @@ int main (void) {
 
    	nonblock(NB_DISABLE);
 
-	printf("\nExiting...\n\n");  
-	
+	printf("\nExiting...\n\n");
+
 	return 0;
 }
+
+void forward(void){
+	tx_right.command = MOTOR_CW;
+	tx_left.command = MOTOR_CCW;
+
+	tx_right.current = CURRENT_MIN;
+	tx_left.current = CURRENT_MIN;
+
+	return;
+}
+
+void backward(void){
+	tx_right.command = MOTOR_CCW;
+	tx_left.command = MOTOR_CW;
+
+	tx_right.current = CURRENT_MIN;
+	tx_left.current = CURRENT_MIN;
+
+	return;
+}
+
+void motor_stop(void){
+	tx_right.command = FREE_RUN;
+	tx_left.command = FREE_RUN;
+
+	tx_right.current = 0;
+	tx_left.current = 0;
+
+	return;
+}
+
+uint8_t current_more(){
+
+
+}
+
+/* // Old keyboard input method
+void current_plus (){
+	if(tx_right.current <= (CURRENT_MAX - CURRENT_STEP)){
+		tx_right.current = tx_right.current + CURRENT_STEP;
+	}
+
+	if(tx_left.current <= (CURRENT_MAX - CURRENT_STEP)){
+		tx_left.current = tx_left.current + CURRENT_STEP;
+	}
+
+	return;
+}
+
+void current_minus (){
+	if(tx_right.current >= CURRENT_STEP){
+		tx_right.current = tx_right.current - CURRENT_STEP;
+	}
+
+	if(tx_right.current >= CURRENT_STEP){
+		tx_right.current = tx_right.current - CURRENT_STEP;
+	}
+
+	return;
+}
+*/
+
 
 rx_struct SPI_exchange_data(tx_struct tx_data){
 	int ret;
@@ -93,11 +252,12 @@ rx_struct SPI_exchange_data(tx_struct tx_data){
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 	};
 	uint8_t rx[ARRAY_SIZE(tx)] = {0, };
-	
+
 	tx[0] = tx_data.address;
-	tx[1] = tx_data.command;
-	tx[3] = tx_data.current;
-		
+	tx[1] = tx_data.current;
+	tx[2] = tx_data.command;
+
+
 	struct spi_ioc_transfer tr = {
 		.tx_buf = (unsigned long)tx,
 		.rx_buf = (unsigned long)rx,
@@ -105,7 +265,7 @@ rx_struct SPI_exchange_data(tx_struct tx_data){
 		.delay_usecs = delay,
 		.speed_hz = speed,
 		.bits_per_word = bits,
-	};	
+	};
 
 	// Transfer and receive data
 	ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
@@ -113,8 +273,8 @@ rx_struct SPI_exchange_data(tx_struct tx_data){
 		printf("can't send spi message\n");
 		fflush(stdout);
 	}
-		
-	// Evaluate	
+
+	// Evaluate
 	received.dutycycle = rx[3];
 	received.current_req = rx[4];
 	received.H_current = rx[5];
@@ -168,6 +328,7 @@ int kbhit()
 
 // Well.... open SPI?
 int openSPI(void){
+	int ret;
 	fd = open(device, O_RDWR);
 	if (fd < 0)
 		printf("can't open device");
@@ -210,4 +371,41 @@ int openSPI(void){
 	printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
 	return;
+}
+
+// Signal timer handler
+static void handler(int sig, siginfo_t *si, void *uc)
+{
+	if(si->si_value.sival_ptr != &timerid){
+		fprintf(stderr, "Stray signal\n");	// not safe to use
+	} else {
+		SPI_timer = 1;
+		timer_settime(timerid, 0, &its, NULL);
+		fprintf(stderr, "tmr overflow\n");
+	}
+
+}
+
+int SPI_timer_init(void)
+{
+        sa.sa_flags = SA_SIGINFO;
+        sa.sa_sigaction = handler;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIG, &sa, NULL);
+
+        sev.sigev_notify = SIGEV_SIGNAL;
+        sev.sigev_signo = SIG;
+        sev.sigev_value.sival_ptr = &timerid;
+        timer_create(CLOCKID, &sev, &timerid);
+
+        // Start the timer
+        its.it_value.tv_sec = 1;
+        its.it_value.tv_nsec = 100000000; // 100ms
+        its.it_interval.tv_sec = its.it_value.tv_sec;
+        its.it_interval.tv_nsec = its.it_value.tv_nsec;
+
+        // Activate timer
+        timer_settime(timerid, 0, &its, NULL);
+
+        return(0);
 }
