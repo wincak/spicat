@@ -70,7 +70,7 @@ void load_tab (void)
 	{
 		ret = getchar();
 		rx_tab[position] = ret;
-		fprintf(stderr,"RD: %i ",ret);
+		//fprintf(stderr,"RD: %i ",ret);
 	}
 	fprintf(stderr,"\n");
 }
@@ -80,22 +80,29 @@ void read_tab (void)
 {
 	// IGNORING X,Z axes and Button!
 	signed char req_power;
+	fprintf(stdout,"Reading... ");
 
 	req_power = rx_tab[1];	// Y axis
 	if(req_power == 0) motor_stop();
-	else if (0 < req_power <= 100)
+	else if (req_power > 0 && req_power <=100)
 	{
 		forward();
+		fprintf(stdout,"FW %i\n",req_power);
 	}
-	else if (-100 <= req_power < 0)
+	else if (req_power < 0 && req_power >=-100)
 	{
 		backward();
+		fprintf(stdout,"RW %i\n",req_power);
 	}
-	else motor_stop(); return;	//error
+	else {
+		motor_stop();	// Error
+		return;
+	}
 
 	tx_right.current = abs(req_power)*(CURRENT_MAX/100);
 	tx_left.current = abs(req_power)*(CURRENT_MAX/100);
-	fprintf(stderr,"ABS: %i \n",abs(req_power)*(CURRENT_MAX/100));
+	fprintf(stdout,"ABS: %i \n",abs(req_power)*(CURRENT_MAX/100));
+	fflush(stdout);
 
 }
 
@@ -115,9 +122,9 @@ int main (void) {
 
 	nonblock(NB_ENABLE);
 	
-	SPI_timer_init();	// Signals cause instant connection loss!! but why?
-	SPI_timer = 0;	// clear timer flag
-	sigprocmask(SIG_BLOCK, &mask, NULL);
+	//SPI_timer_init();	// Signals cause instant connection loss!! but why?
+	//SPI_timer = 0;	// clear timer flag
+	//sigprocmask(SIG_BLOCK, &mask, NULL);
 
 	printf("Start...\n");
 	fflush(stdout);	
@@ -127,14 +134,12 @@ int main (void) {
   	while(1){
 
 		// Read input
-		fprintf(stderr, "cycle\n");
 		ch = getchar();
 		if (ch == 255) {
 			printf("Connection closed\n"); return(EXIT_SUCCESS);
 		}
 
 		if (ch == 250){
-			fprintf(stderr,"Loading tab\n");
 			load_tab();
 			read_tab();
 		}
@@ -163,7 +168,7 @@ int main (void) {
 		rx_left = SPI_exchange_data(tx_left);
 
 		//printf("trans-temp: %i \n",rx_right.trans_temp); fflush(stdout);
-		printf("\rRGHT: %i CURR: %.1d TEMP: %i             ",tx_right.command, \
+		printf("\rRGHT: %i CURR: %.1d TEMP: %i             \n",tx_right.command, \
 		tx_right.current/10, rx_right.trans_temp);
 
 		fflush(stdout);
@@ -210,11 +215,6 @@ void motor_stop(void){
 	tx_left.current = 0;
 
 	return;
-}
-
-uint8_t current_more(){
-
-
 }
 
 /* // Old keyboard input method
