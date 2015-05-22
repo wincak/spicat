@@ -70,7 +70,6 @@ void load_tab (void)
 	{
 		ret = getchar();
 		rx_tab[position] = ret;
-		//fprintf(stderr,"RD: %i ",ret);
 	}
 	fprintf(stderr,"\n");
 }
@@ -80,28 +79,30 @@ void read_tab (void)
 {
 	// IGNORING X,Z axes and Button!
 	signed char req_power;
-	fprintf(stdout,"Reading... ");
 
 	req_power = rx_tab[1];	// Y axis
 	if(req_power == 0) motor_stop();
 	else if (req_power > 0 && req_power <=100)
 	{
 		forward();
-		fprintf(stdout,"FW %i\n",req_power);
 	}
 	else if (req_power < 0 && req_power >=-100)
 	{
 		backward();
-		fprintf(stdout,"RW %i\n",req_power);
 	}
 	else {
 		motor_stop();	// Error
 		return;
 	}
 
+	// Steer
+	signed char steer_angle;
+	steer_angle = rx_tab[0]; // X axis
+	set_servo(steer_angle);
+	printf("STEER: %i\n",steer_angle);
+
 	tx_right.current = abs(req_power)*(CURRENT_MAX/100);
 	tx_left.current = abs(req_power)*(CURRENT_MAX/100);
-	fprintf(stdout,"ABS: %i \n",abs(req_power)*(CURRENT_MAX/100));
 	fflush(stdout);
 
 }
@@ -126,6 +127,8 @@ int main (void) {
 	//SPI_timer = 0;	// clear timer flag
 	//sigprocmask(SIG_BLOCK, &mask, NULL);
 
+	servo_init();
+
 	printf("Start...\n");
 	fflush(stdout);	
 
@@ -148,28 +151,17 @@ int main (void) {
 		int c;
 		while ((c = getchar()) != '\n' && c != EOF) fprintf(stderr, "clr");
 
-// Old keyboard control method
-/*
-  		if(kbhit()){
-  			ch = fgetc(stdin);
-			switch (ch){
-				case 'w': forward(); break;
-				case 's': backward(); break;
-				case ' ': motor_stop(); break;
-				case '+': current_plus(); break;
-				case '-': current_minus(); break;
-				case '\n': break;
-				case 'q': return 0;
-				//default: tx[0] = 0; printf("\r\n");
-			}
-		}
-*/
 		rx_right = SPI_exchange_data(tx_right);
 		rx_left = SPI_exchange_data(tx_left);
 
 		//printf("trans-temp: %i \n",rx_right.trans_temp); fflush(stdout);
-		printf("\rRGHT: %i CURR: %.1d TEMP: %i             \n",tx_right.command, \
-		tx_right.current/10, rx_right.trans_temp);
+		if(rx_right.status_byte){
+			fprintf(stdout,"\rONLINE  ");
+		}
+		else fprintf(stdout,"\r ERROR!  ");
+
+		printf("RGHT: %i REQ: %i MEAS: %.1d TEMP: %i             \n",tx_right.command, \
+		rx_right.current_req, tx_right.current/10, rx_right.trans_temp);
 
 		fflush(stdout);
 
@@ -216,32 +208,6 @@ void motor_stop(void){
 
 	return;
 }
-
-/* // Old keyboard input method
-void current_plus (){
-	if(tx_right.current <= (CURRENT_MAX - CURRENT_STEP)){
-		tx_right.current = tx_right.current + CURRENT_STEP;
-	}
-
-	if(tx_left.current <= (CURRENT_MAX - CURRENT_STEP)){
-		tx_left.current = tx_left.current + CURRENT_STEP;
-	}
-
-	return;
-}
-
-void current_minus (){
-	if(tx_right.current >= CURRENT_STEP){
-		tx_right.current = tx_right.current - CURRENT_STEP;
-	}
-
-	if(tx_right.current >= CURRENT_STEP){
-		tx_right.current = tx_right.current - CURRENT_STEP;
-	}
-
-	return;
-}
-*/
 
 
 rx_struct SPI_exchange_data(tx_struct tx_data){

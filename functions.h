@@ -43,3 +43,7 @@ void motor_stop(void);
 /* Signals */
 static void handler(int sig, siginfo_t *si, void *uc);
 int SPI_timer_init(void);
+
+// Servo
+void servo_init(void);
+void set_servo(signed char angle);
