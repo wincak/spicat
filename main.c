@@ -8,7 +8,7 @@
 /*								    */
 /********************************************************************/
 
-// Compile with -lrt linker option
+// If using timers, compile with -lrt linker option
 
 // Usage with netcat (nc)
 // HOST:	$ mkfifo fifo
@@ -35,7 +35,8 @@
 static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
 static uint8_t bits = 8;
-static uint32_t speed = 245000;
+//static uint32_t speed = 245000;	// 40 MHz ok
+static uint32_t speed = 50000;		// for 10 MHz PIC clock
 static uint16_t delay;
 
 // Signal timer variables
@@ -109,6 +110,7 @@ void read_tab (void)
 
 
 int main (void) {
+	// Init SPI TX values
 	tx_right.address = PIC1;
 	tx_right.command = 0;
 	tx_right.current= 0;
@@ -116,6 +118,9 @@ int main (void) {
 	tx_left.address = PIC2;
 	tx_right.command = 0;
 	tx_right.current= 0;
+
+	// Variables to convert/calculate measured current
+	short right_current_meas, left_current_meas;
 
 	fprintf(stdout,"Hello from raspberry!!\n");
 
@@ -154,14 +159,28 @@ int main (void) {
 		rx_right = SPI_exchange_data(tx_right);
 		rx_left = SPI_exchange_data(tx_left);
 
+		// 2x char -> short
+		right_current_meas = (rx_right.H_current<<8) + rx_right.L_current;
+		left_current_meas = (rx_left.H_current<<8) + rx_left.L_current;
+
 		//printf("trans-temp: %i \n",rx_right.trans_temp); fflush(stdout);
 		if(rx_right.status_byte){
-			fprintf(stdout,"\rONLINE  ");
+			fprintf(stdout,"\rRGHT-> ONLINE  ");
 		}
-		else fprintf(stdout,"\r ERROR!  ");
+		else fprintf(stdout,"\rRGHT-> ERROR!  ");
 
-		printf("RGHT: %i REQ: %i MEAS: %.1d TEMP: %i             \n",tx_right.command, \
-		rx_right.current_req, tx_right.current/10, rx_right.trans_temp);
+		printf("MODE: %i REQ: %.1f MEAS: %.1f DTC: %i TEMP: %i BATT: %.1f            \n",
+			tx_right.command, ((float)rx_right.current_req)/10, ((float)right_current_meas)/10, \
+			 rx_right.dutycycle, rx_right.trans_temp, ((float)rx_right.batt_voltage)/10);
+
+		if(rx_left.status_byte){
+			fprintf(stdout,"\rLEFT-> ONLINE  ");
+		}
+		else fprintf(stdout,"\rLEFT-> ERROR!  ");
+
+		printf("MODE: %i REQ: %.1f MEAS: %.1f DTC: %i TEMP: %i BATT: %.1f           \n",
+			tx_left.command, ((float)rx_left.current_req)/10, ((float)left_current_meas)/10, \
+			 rx_left.dutycycle, rx_left.trans_temp, ((float)rx_left.batt_voltage)/10);
 
 		fflush(stdout);
 
