@@ -39,6 +39,7 @@ void read_tab(void);
 void forward(void);
 void backward(void);
 void motor_stop(void);
+void motor_regen(void);
 
 /* Signals */
 static void handler(int sig, siginfo_t *si, void *uc);

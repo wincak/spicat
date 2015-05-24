@@ -36,7 +36,7 @@ static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
 static uint8_t bits = 8;
 //static uint32_t speed = 245000;	// 40 MHz ok
-static uint32_t speed = 50000;		// for 10 MHz PIC clock
+static uint32_t speed = 50000;		// 10 MHz ok
 static uint16_t delay;
 
 // Signal timer variables
@@ -81,29 +81,38 @@ void read_tab (void)
 	// IGNORING X,Z axes and Button!
 	signed char req_power;
 
-	req_power = rx_tab[1];	// Y axis
-	if(req_power == 0) motor_stop();
-	else if (req_power > 0 && req_power <=100)
-	{
-		forward();
-	}
-	else if (req_power < 0 && req_power >=-100)
-	{
-		backward();
-	}
-	else {
-		motor_stop();	// Error
-		return;
-	}
+        // Steer
+        signed char steer_angle;
+        steer_angle = rx_tab[0]; // X axis
+        set_servo(steer_angle);
+        printf("STEER: %i\n",steer_angle);
 
-	// Steer
-	signed char steer_angle;
-	steer_angle = rx_tab[0]; // X axis
-	set_servo(steer_angle);
-	printf("STEER: %i\n",steer_angle);
+        // Brake
+        printf("BRK: %i ",rx_tab[3]);	// Brake/Regen
 
+	if(rx_tab[3])
+	{
+		motor_regen();
+	}
+	else
+	{
+		req_power = rx_tab[1];	// Y axis
+		if(req_power == 0) motor_stop();
+		else if (req_power > 0 && req_power <=100)
+		{
+			forward();
+		}
+		else if (req_power < 0 && req_power >=-100)
+		{
+			backward();
+		}
+		else {
+			motor_stop();	// Error
+			return;
+		}
 	tx_right.current = abs(req_power)*(CURRENT_MAX/100);
 	tx_left.current = abs(req_power)*(CURRENT_MAX/100);
+	}
 	fflush(stdout);
 
 }
@@ -169,22 +178,29 @@ int main (void) {
 		}
 		else fprintf(stdout,"\rRGHT-> ERROR!  ");
 
-		printf("MODE: %i REQ: %.1f MEAS: %.1f DTC: %i TEMP: %i BATT: %.1f            \n",
-			tx_right.command, ((float)rx_right.current_req)/10, ((float)right_current_meas)/10, \
-			 rx_right.dutycycle, rx_right.trans_temp, ((float)rx_right.batt_voltage)/10);
+		printf("MODE:%i REQ:%.1f MEAS:%.1f DTC:%i TEMP:%i BATT:%.1f            \n",\
+			(rx_right.status_byte & 0b00000111),\
+			((float)rx_right.current_req)/10,\
+			((float)right_current_meas)/10, \
+			rx_right.dutycycle,\
+			rx_right.trans_temp,\
+			((float)rx_right.batt_voltage)/10);
 
 		if(rx_left.status_byte){
 			fprintf(stdout,"\rLEFT-> ONLINE  ");
 		}
 		else fprintf(stdout,"\rLEFT-> ERROR!  ");
 
-		printf("MODE: %i REQ: %.1f MEAS: %.1f DTC: %i TEMP: %i BATT: %.1f           \n",
-			tx_left.command, ((float)rx_left.current_req)/10, ((float)left_current_meas)/10, \
-			 rx_left.dutycycle, rx_left.trans_temp, ((float)rx_left.batt_voltage)/10);
+		printf("MODE:%i REQ:%.1f MEAS:%.1f DTC:%i TEMP:%i BATT:%.1f           \n",\
+			(rx_left.status_byte & 0b00000111),\
+			((float)rx_left.current_req)/10,\
+			((float)left_current_meas)/10,\
+			rx_left.dutycycle,\
+			rx_left.trans_temp,\
+			((float)rx_left.batt_voltage)/10);
 
 		fflush(stdout);
 
-		//usleep(100000);	// original value
 		usleep(10000);	// just testing signals
 
   	}
@@ -228,6 +244,15 @@ void motor_stop(void){
 	return;
 }
 
+void motor_regen(void){
+	tx_right.command = REGEN;
+	tx_left.command = REGEN;
+
+	tx_right.current = 0;
+	tx_left.current = 0;
+
+	return;
+}
 
 rx_struct SPI_exchange_data(tx_struct tx_data){
 	int ret;

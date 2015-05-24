@@ -20,6 +20,7 @@
 #define FREE_RUN	0b000
 #define MOTOR_CW	0b001
 #define MOTOR_CCW	0b010
+#define REGEN		0b100	// direction checked by controller
 #define REGEN_CW	0b101
 #define REGEN_CCW	0b110
 #define BRAKE		0b111
